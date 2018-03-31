@@ -32,7 +32,7 @@ class Tracker:
         return True
 
 
-    def getMatches(self, image1, image2, roi=None, maxFeatures=5000, matchPercent=0.25):
+    def getMatches(self, image1, image2, roi=None, maxFeatures=500, matchPercent=1.0):
         """Calculates the promising matching features between two input images
         Args:
             image1: first input image
@@ -71,6 +71,11 @@ class Tracker:
         numGoodMatches = int(len(matches) * matchPercent)
         matches = matches[:numGoodMatches]
 
+        # Check for tracking failure
+        status = True
+        if numGoodMatches < 10:
+            status = False
+
         # Extract location of good matches
         points1 = np.zeros((len(matches), 2))
         points2 = np.zeros((len(matches), 2))
@@ -79,7 +84,7 @@ class Tracker:
             points1[i, :] = keypoints1[match.queryIdx].pt
             points2[i, :] = keypoints2[match.trainIdx].pt
 
-        return np.int_(points1), np.int_(points2)
+        return status, np.int_(points1), np.int_(points2)
 
 
     def setTrackBox(self, image, minBoxAreaFactor=2, windowName=None):
@@ -123,7 +128,7 @@ class Tracker:
             if not self.isPerson(image, trackBox):
                 # Display warning message
                 cv2.putText(image_, "CANNOT DETECT ANY PERSON ON THE SELECTED REGION", (textOrg, textOrg),
-                cv2.FONT_HERSHEY_PLAIN, fontScale, (20, 255, 57), thickness)
+                 cv2.FONT_HERSHEY_PLAIN, fontScale, (20, 255, 57), thickness)
             else:
                 # End loop if a person is selected
                 cv2.destroyWindow(windowName)
@@ -139,7 +144,7 @@ class Tracker:
         pt2y = min(int(trackBox[0]+trackBox[2]+velocity[0]), image_size[0])
         pt2x = min(int(trackBox[1]+trackBox[3]+velocity[1]), image_size[1])
 
-        new_trackBox = (pt1y, pt1x, pt2y-pt1y, pt2x-pt2x)
+        new_trackBox = (pt1y, pt1x, pt2y-pt1y, pt2x-pt1x)
         return new_trackBox
 
 
@@ -165,7 +170,7 @@ class Tracker:
             self.centroid_pts.append(centroid)
 
             # Set initial velocity to be zero
-            self.velocity = (0,0)
+            self.velocity = np.array([0,0])
         
 
     def update(self, image):
@@ -174,12 +179,17 @@ class Tracker:
         self.current_frame = image
 
         # Get the displacement of target
-        points1, points2 = self.getMatches(self.previous_frame, self.current_frame, self.roi)
-        displacements = points2 - points1
-        self.velocity = np.mean(displacements, axis=0)
+        ret, points1, points2 = self.getMatches(self.previous_frame, self.current_frame, self.roi)
+        if ret:
+            displacements = points2 - points1
+            self.velocity = np.flip(np.int_(np.mean(displacements, axis=0)), 0) * 4
+        else:
+            print('Track failure')
+            self.velocity = np.array([0,0])
 
-        # Update track box
+        # Update track box and roi
         self.trackBox = self.getTrackBox(self.trackBox, self.velocity, self.image_size)
+        self.roi = self.trackBox
 
         # Update centroid_pts
         centroid = (int(self.trackBox[0] + 0.5*self.trackBox[2]),
